@@ -139,17 +139,27 @@ async def balances(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(response)
 
 # ویرایش یا حذف خرید
-async def edit_or_delete_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def edit_or_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global data
-    if not data["purchases"]:
-        await update.message.reply_text("هیچ خریدی برای ویرایش یا حذف موجود نیست.")
-        return ConversationHandler.END
+    try:
+        purchase_id = int(update.message.text)
+        purchase = next((p for p in data["purchases"] if p["id"] == purchase_id), None)
+        if not purchase:
+            await update.message.reply_text("شناسه نامعتبر است. لطفاً دوباره تلاش کنید.")
+            return EDIT_OR_DELETE
 
-    response = "برای ویرایش یا حذف، شناسه خرید را وارد کنید:\n"
-    for purchase in data["purchases"]:
-        response += f"{purchase['id']}. {purchase['item']} - {purchase['amount']} تومان\n"
-    await update.message.reply_text(response)
-    return EDIT_OR_DELETE
+        actions = [["ویرایش", "حذف"]]
+        context.user_data["edit_purchase"] = purchase
+        await update.message.reply_text(
+            f"خرید انتخاب شده: {purchase['item']} - {purchase['amount']} تومان\nعملیات مورد نظر را انتخاب کنید:",
+            reply_markup=ReplyKeyboardMarkup(actions, one_time_keyboard=True)
+        )
+        return SELECT_ACTION  # تغییر وضعیت به انتخاب عملیات
+
+    except ValueError:
+        await update.message.reply_text("شناسه باید عدد باشد. لطفاً دوباره تلاش کنید.")
+        return EDIT_OR_DELETE
+
 
 # عملیات ویرایش یا حذف
 async def edit_or_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
