@@ -1,7 +1,15 @@
 #7286317589:AAGQzHVEkMsnwaH1NB6hOA5Y4bn8vo7pJu0
 # 7042785861:AAGqpupr0ple996Nqsfn_ZHmiuy5w4RST3E
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters, CallbackContext
+from telegram import Update
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    filters,
+    ContextTypes,
+)
+
 import json
 
 # Global Variables
@@ -162,15 +170,15 @@ def message_handler(update: Update, context: CallbackContext):
 # Main Function
 def main():
     load_data()
-    updater = Updater("7042785861:AAGqpupr0ple996Nqsfn_ZHmiuy5w4RST3E")
-    dispatcher = updater.dispatcher
+    Application = Application("7042785861:AAGqpupr0ple996Nqsfn_ZHmiuy5w4RST3E")
+    dispatcher = Application.dispatcher
 
     dispatcher.add_handler(CommandHandler("start", start))
     dispatcher.add_handler(CallbackQueryHandler(button_handler))
-    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, message_handler))
+    dispatcher.add_handler(MessageHandler(filters.text & ~filters.command, message_handler))
 
-    updater.start_polling()
-    updater.idle()
+    Application.start_polling()
+    Application.idle()
 
 if __name__ == "__main__":
     main()
