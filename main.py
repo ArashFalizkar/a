@@ -1,184 +1,268 @@
 #7286317589:AAGQzHVEkMsnwaH1NB6hOA5Y4bn8vo7pJu0
 # 7042785861:AAGqpupr0ple996Nqsfn_ZHmiuy5w4RST3E
-from telegram import Update
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    CallbackQueryHandler,
-    MessageHandler,
-    filters,
-    ContextTypes,
-)
-
 import json
+from telegram import Update, ReplyKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters, ConversationHandler
 
-# Global Variables
-orders = []
-accounts = {"ارش": 0, "راضی": 0, "کدیور": 0, "یدالله": 0, "سینا": 0}
+# فایل ذخیره‌سازی داده‌ها
+DATA_FILE = "data.json"
 
-# File Operations
-def save_data():
-    with open("data.json", "w") as file:
-        json.dump({"orders": orders, "accounts": accounts}, file, ensure_ascii=False, indent=4)
+# مراحل مکالمه
+SELECT_ACTION, ITEM, AMOUNT, BUYER, PARTICIPANTS, EDIT_OR_DELETE, EDIT_ITEM, EDIT_AMOUNT, EDIT_BUYER, EDIT_PARTICIPANTS = range(10)
 
+# بارگذاری داده‌ها از فایل
 def load_data():
-    global orders, accounts
     try:
-        with open("data.json", "r") as file:
-            data = json.load(file)
-            orders = data["orders"]
-            accounts = data["accounts"]
+        with open(DATA_FILE, "r") as file:
+            return json.load(file)
     except FileNotFoundError:
-        orders = []
-        accounts = {"ارش": 0, "راضی": 0, "کدیور": 0, "یدالله": 0, "سینا": 0}
+        return {"purchases": [], "balances": {}}
 
-# Calculate Shares
-def calculate_shares(item, amount, buyer, participants):
-    global accounts
-    split_amount = amount / len(participants)
-    for participant in participants:
-        if participant != buyer:
-            accounts[participant] -= split_amount
-    accounts[buyer] += amount - split_amount * (len(participants) - 1)
+# ذخیره داده‌ها در فایل
+def save_data(data):
+    with open(DATA_FILE, "w") as file:
+        json.dump(data, file, indent=4)
 
-# Start Command
-def start(update: Update, context: CallbackContext):
-    keyboard = [
-        [InlineKeyboardButton("ثبت خرید", callback_data="register_purchase")],
-        [InlineKeyboardButton("لیست سفارش‌ها", callback_data="list_orders")],
-        [InlineKeyboardButton("حذف سفارش", callback_data="delete_order")],
-        [InlineKeyboardButton("ویرایش سفارش", callback_data="edit_order")],
-        [InlineKeyboardButton("مشاهده حساب‌ها", callback_data="view_accounts")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    update.message.reply_text("لطفاً یک گزینه را انتخاب کنید:", reply_markup=reply_markup)
+# داده‌های برنامه
+data = load_data()
 
-# Button Handler
-def button_handler(update: Update, context: CallbackContext):
-    query = update.callback_query
-    query.answer()
-    if query.data == "register_purchase":
-        query.message.reply_text("چه چیزی خرید شده است؟")
-        context.user_data["state"] = "ask_item"
-    elif query.data == "list_orders":
-        if orders:
-            message = "لیست سفارش‌ها:\n" + "\n".join([f"کد {i+1}: {o['item']} - {o['amount']} تومان" for i, o in enumerate(orders)])
+# شروع مکالمه
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    actions = [["افزودن خرید", "مشاهده خریدها"], ["ویرایش یا حذف خرید", "مشاهده مانده حساب"]]
+    await update.message.reply_text(
+        "سلام! لطفاً یک عملیات انتخاب کنید:",
+        reply_markup=ReplyKeyboardMarkup(actions, one_time_keyboard=True)
+    )
+    return SELECT_ACTION
+
+# انتخاب عملیات
+async def select_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_choice = update.message.text
+    if user_choice == "افزودن خرید":
+        await update.message.reply_text("لطفاً نام محصول را وارد کنید:")
+        return ITEM
+    elif user_choice == "مشاهده خریدها":
+        await list_purchases(update, context)
+        return ConversationHandler.END
+    elif user_choice == "ویرایش یا حذف خرید":
+        await edit_or_delete_prompt(update, context)
+        return EDIT_OR_DELETE
+    elif user_choice == "مشاهده مانده حساب":
+        await balances(update, context)
+        return ConversationHandler.END
+    else:
+        await update.message.reply_text("انتخاب نامعتبر است. لطفاً دوباره تلاش کنید.")
+        return SELECT_ACTION
+
+# شروع ثبت خرید
+async def get_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["item"] = update.message.text
+    await update.message.reply_text("لطفاً مبلغ خرید را وارد کنید:")
+    return AMOUNT
+
+# دریافت مبلغ
+async def get_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        context.user_data["amount"] = int(update.message.text)
+        buyers = [["عرفان", "کدیور", "عرفان راضی"], ["یدالله", "سینا", "ارش"]]
+        await update.message.reply_text(
+            "لطفاً نام خریدار را انتخاب کنید:",
+            reply_markup=ReplyKeyboardMarkup(buyers, one_time_keyboard=True)
+        )
+        return BUYER
+    except ValueError:
+        await update.message.reply_text("لطفاً مبلغ را به صورت عدد وارد کنید:")
+        return AMOUNT
+
+# دریافت نام خریدار
+async def get_buyer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["buyer"] = update.message.text
+    await update.message.reply_text("لطفاً نام افرادی که در خرید شرکت داشتند را با فاصله وارد کنید (مثال: عرفان سینا ارش):")
+    return PARTICIPANTS
+
+# دریافت اعضا و ثبت خرید
+async def get_participants(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global data
+    participants = update.message.text.split()
+    context.user_data["participants"] = participants
+
+    item = context.user_data["item"]
+    amount = context.user_data["amount"]
+    buyer = context.user_data["buyer"]
+
+    # ذخیره خرید در داده‌ها
+    purchase = {
+        "id": len(data["purchases"]) + 1,
+        "item": item,
+        "amount": amount,
+        "buyer": buyer,
+        "participants": participants,
+    }
+    data["purchases"].append(purchase)
+
+    # محاسبه سهم‌ها
+    share = amount / len(participants)
+    for person in participants:
+        if person not in data["balances"]:
+            data["balances"][person] = 0
+        if person == buyer:
+            data["balances"][person] += amount - share
         else:
-            message = "هیچ سفارشی ثبت نشده است."
-        query.message.reply_text(message)
-    elif query.data == "delete_order":
-        query.message.reply_text("کد سفارش برای حذف را وارد کنید:")
-        context.user_data["state"] = "ask_delete_order"
-    elif query.data == "edit_order":
-        query.message.reply_text("کد سفارش برای ویرایش را وارد کنید:")
-        context.user_data["state"] = "ask_edit_order"
-    elif query.data == "view_accounts":
-        message = "حساب‌ها:\n" + "\n".join([f"{name}: {balance} تومان" for name, balance in accounts.items()])
-        query.message.reply_text(message)
+            data["balances"][person] -= share
 
-# Message Handler
-def message_handler(update: Update, context: CallbackContext):
-    state = context.user_data.get("state")
-    if state == "ask_item":
-        context.user_data["item"] = update.message.text
-        update.message.reply_text("مبلغ خرید را وارد کنید:")
-        context.user_data["state"] = "ask_amount"
-    elif state == "ask_amount":
-        try:
-            context.user_data["amount"] = int(update.message.text)
-            update.message.reply_text("چه کسی خرید کرده؟ (ارش، راضی، کدیور، یدالله، سینا)")
-            context.user_data["state"] = "ask_buyer"
-        except ValueError:
-            update.message.reply_text("لطفاً مبلغ معتبر وارد کنید:")
-    elif state == "ask_buyer":
-        buyer = update.message.text
-        if buyer in accounts:
-            context.user_data["buyer"] = buyer
-            update.message.reply_text("چه افرادی در این خرید بودند؟ با کاما جدا کنید (ارش، راضی، کدیور، یدالله، سینا):")
-            context.user_data["state"] = "ask_participants"
+    # ذخیره‌سازی داده‌ها
+    save_data(data)
+
+    await update.message.reply_text(f"خرید {item} به مبلغ {amount} تومان ثبت شد.")
+    return ConversationHandler.END
+
+# مشاهده لیست خریدها
+async def list_purchases(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global data
+    if not data["purchases"]:
+        await update.message.reply_text("هیچ خریدی ثبت نشده است.")
+        return
+    response = "لیست خریدها:\n"
+    for purchase in data["purchases"]:
+        response += f"{purchase['id']}. {purchase['item']} - {purchase['amount']} تومان - خریدار: {purchase['buyer']}\n"
+    await update.message.reply_text(response)
+
+# مشاهده مانده حساب‌ها
+async def balances(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global data
+    if not data["balances"]:
+        await update.message.reply_text("هیچ اطلاعاتی موجود نیست.")
+        return
+    response = "مانده حساب افراد:\n"
+    for person, balance in data["balances"].items():
+        response += f"{person}: {'+' if balance > 0 else ''}{balance} تومان\n"
+    await update.message.reply_text(response)
+
+# ویرایش یا حذف خرید
+async def edit_or_delete_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global data
+    if not data["purchases"]:
+        await update.message.reply_text("هیچ خریدی برای ویرایش یا حذف موجود نیست.")
+        return ConversationHandler.END
+
+    response = "برای ویرایش یا حذف، شناسه خرید را وارد کنید:\n"
+    for purchase in data["purchases"]:
+        response += f"{purchase['id']}. {purchase['item']} - {purchase['amount']} تومان\n"
+    await update.message.reply_text(response)
+    return EDIT_OR_DELETE
+
+# عملیات ویرایش یا حذف
+async def edit_or_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global data
+    try:
+        purchase_id = int(update.message.text)
+        purchase = next((p for p in data["purchases"] if p["id"] == purchase_id), None)
+        if not purchase:
+            await update.message.reply_text("شناسه نامعتبر است. لطفاً دوباره تلاش کنید.")
+            return EDIT_OR_DELETE
+
+        actions = [["ویرایش", "حذف"]]
+        context.user_data["edit_purchase"] = purchase
+        await update.message.reply_text(
+            f"خرید انتخاب شده: {purchase['item']} - {purchase['amount']} تومان\nعملیات مورد نظر را انتخاب کنید:",
+            reply_markup=ReplyKeyboardMarkup(actions, one_time_keyboard=True)
+        )
+        return SELECT_ACTION
+    except ValueError:
+        await update.message.reply_text("شناسه باید عدد باشد. لطفاً دوباره تلاش کنید.")
+        return EDIT_OR_DELETE
+
+# ویرایش خرید
+async def edit_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    purchase = context.user_data.get("edit_purchase")
+    if not purchase:
+        await update.message.reply_text("هیچ خریدی برای ویرایش پیدا نشد.")
+        return ConversationHandler.END
+    
+    action = update.message.text
+    if action == "ویرایش":
+        await update.message.reply_text("لطفاً انتخاب کنید که کدام بخش را ویرایش کنید: محصول، مبلغ، خریدار، یا افراد شرکت‌کننده")
+        return EDIT_ITEM
+    elif action == "حذف":
+        data["purchases"].remove(purchase)
+        save_data(data)
+        await update.message.reply_text(f"خرید {purchase['item']} حذف شد.")
+        return ConversationHandler.END
+
+# ویرایش محصول
+async def edit_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["edit_purchase"]["item"] = update.message.text
+    await update.message.reply_text("محصول به روزرسانی شد. برای ویرایش مبلغ، لطفاً مبلغ جدید را وارد کنید:")
+    return EDIT_AMOUNT
+
+# ویرایش مبلغ
+async def edit_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        context.user_data["edit_purchase"]["amount"] = int(update.message.text)
+        await update.message.reply_text("مبلغ به روزرسانی شد. برای ویرایش خریدار، لطفاً نام خریدار جدید را وارد کنید:")
+        return EDIT_BUYER
+    except ValueError:
+        await update.message.reply_text("لطفاً مبلغ را به صورت عدد وارد کنید:")
+        return EDIT_AMOUNT
+
+# ویرایش خریدار
+async def edit_buyer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["edit_purchase"]["buyer"] = update.message.text
+    await update.message.reply_text("خریدار به روزرسانی شد. برای ویرایش افراد شرکت‌کننده، لطفاً نام افراد جدید را وارد کنید:")
+    return EDIT_PARTICIPANTS
+
+# ویرایش افراد شرکت‌کننده
+async def edit_participants(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    participants = update.message.text.split()
+    context.user_data["edit_purchase"]["participants"] = participants
+
+    # به روز رسانی سهم‌ها
+    purchase = context.user_data["edit_purchase"]
+    amount = purchase["amount"]
+    participants = purchase["participants"]
+    share = amount / len(participants)
+    
+    for person in participants:
+        if person not in data["balances"]:
+            data["balances"][person] = 0
+        if person == purchase["buyer"]:
+            data["balances"][person] += amount - share
         else:
-            update.message.reply_text("نام وارد شده معتبر نیست. دوباره تلاش کنید:")
-    elif state == "ask_participants":
-        participants = [p.strip() for p in update.message.text.split(",") if p.strip() in accounts]
-        if participants:
-            item = context.user_data["item"]
-            amount = context.user_data["amount"]
-            buyer = context.user_data["buyer"]
-            orders.append({"item": item, "amount": amount, "buyer": buyer, "participants": participants})
-            calculate_shares(item, amount, buyer, participants)
-            save_data()
-            update.message.reply_text(f"خرید ثبت شد:\nنام خرید: {item}\nمبلغ: {amount}\nخریدار: {buyer}\nاعضا: {', '.join(participants)}")
-            context.user_data.clear()
-        else:
-            update.message.reply_text("لطفاً حداقل یک عضو معتبر وارد کنید:")
-    elif state == "ask_delete_order":
-        try:
-            order_index = int(update.message.text) - 1
-            if 0 <= order_index < len(orders):
-                deleted_order = orders.pop(order_index)
-                save_data()
-                update.message.reply_text(f"سفارش با کد {order_index + 1} حذف شد: {deleted_order['item']}")
-            else:
-                update.message.reply_text("کد سفارش نامعتبر است:")
-        except ValueError:
-            update.message.reply_text("لطفاً کد معتبر وارد کنید:")
-    elif state == "ask_edit_order":
-        try:
-            order_index = int(update.message.text) - 1
-            if 0 <= order_index < len(orders):
-                context.user_data["edit_index"] = order_index
-                order = orders[order_index]
-                update.message.reply_text(f"نام فعلی: {order['item']}\nنام جدید را وارد کنید:")
-                context.user_data["state"] = "edit_item"
-            else:
-                update.message.reply_text("کد سفارش نامعتبر است:")
-        except ValueError:
-            update.message.reply_text("لطفاً کد معتبر وارد کنید:")
-    elif state == "edit_item":
-        order_index = context.user_data["edit_index"]
-        orders[order_index]["item"] = update.message.text
-        update.message.reply_text(f"مبلغ فعلی: {orders[order_index]['amount']}\nمبلغ جدید را وارد کنید:")
-        context.user_data["state"] = "edit_amount"
-    elif state == "edit_amount":
-        try:
-            order_index = context.user_data["edit_index"]
-            orders[order_index]["amount"] = int(update.message.text)
-            update.message.reply_text(f"خریدار فعلی: {orders[order_index]['buyer']}\nخریدار جدید را وارد کنید:")
-            context.user_data["state"] = "edit_buyer"
-        except ValueError:
-            update.message.reply_text("لطفاً مبلغ معتبر وارد کنید:")
-    elif state == "edit_buyer":
-        order_index = context.user_data["edit_index"]
-        buyer = update.message.text
-        if buyer in accounts:
-            orders[order_index]["buyer"] = buyer
-            update.message.reply_text(f"اعضای فعلی: {', '.join(orders[order_index]['participants'])}\nاعضای جدید را وارد کنید با کاما جدا کنید:")
-            context.user_data["state"] = "edit_participants"
-        else:
-            update.message.reply_text("نام وارد شده معتبر نیست. دوباره تلاش کنید:")
-    elif state == "edit_participants":
-        order_index = context.user_data["edit_index"]
-        participants = [p.strip() for p in update.message.text.split(",") if p.strip() in accounts]
-        if participants:
-            orders[order_index]["participants"] = participants
-            save_data()
-            update.message.reply_text("ویرایش سفارش با موفقیت انجام شد.")
-            context.user_data.clear()
-        else:
-            update.message.reply_text("لطفاً حداقل یک عضو معتبر وارد کنید:")
+            data["balances"][person] -= share
+    
+    # ذخیره‌سازی داده‌ها
+    save_data(data)
+    await update.message.reply_text(f"خرید {purchase['item']} به روزرسانی شد.")
+    return ConversationHandler.END
 
-# Main Function
-def main():
-    load_data()
-    Application = Application("7042785861:AAGqpupr0ple996Nqsfn_ZHmiuy5w4RST3E")
-    dispatcher = Application.dispatcher
+# لغو مکالمه
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("عملیات لغو شد.")
+    return ConversationHandler.END
 
-    dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(CallbackQueryHandler(button_handler))
-    dispatcher.add_handler(MessageHandler(filters.text & ~filters.command, message_handler))
+# اجرای برنامه
+if __name__ == '__main__':
+    app = ApplicationBuilder().token("7042785861:AAGqpupr0ple996Nqsfn_ZHmiuy5w4RST3E").build()
 
-    Application.start_polling()
-    Application.idle()
+    # تعریف مکالمه
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("start", start)],
+        states={
+            SELECT_ACTION: [MessageHandler(filters.TEXT, select_action)],
+            ITEM: [MessageHandler(filters.TEXT, get_item)],
+            AMOUNT: [MessageHandler(filters.TEXT, get_amount)],
+            BUYER: [MessageHandler(filters.TEXT, get_buyer)],
+            PARTICIPANTS: [MessageHandler(filters.TEXT, get_participants)],
+            EDIT_OR_DELETE: [MessageHandler(filters.TEXT, edit_or_delete)],
+            EDIT_ITEM: [MessageHandler(filters.TEXT, edit_item)],
+            EDIT_AMOUNT: [MessageHandler(filters.TEXT, edit_amount)],
+            EDIT_BUYER: [MessageHandler(filters.TEXT, edit_buyer)],
+            EDIT_PARTICIPANTS: [MessageHandler(filters.TEXT, edit_participants)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
 
-if __name__ == "__main__":
-    main()
+    # ثبت دستورات
+    app.add_handler(conv_handler)
+    app.run_polling()
+
