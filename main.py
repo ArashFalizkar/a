@@ -3,10 +3,7 @@
 import json
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters, ConversationHandler
-from telegram.ext import Updater
 
-updater = Updater(token='7042785861:AAGqpupr0ple996Nqsfn_ZHmiuy5w4RST3E')
-updater.bot.set_webhook('https://your-server.com/webhook-endpoint')
 
 # ادامه کد شما...
 
