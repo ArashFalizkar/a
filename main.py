@@ -155,10 +155,11 @@ async def edit_or_delete_prompt(update: Update, context: ContextTypes.DEFAULT_TY
 async def edit_or_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global data
     try:
-        purchase_id = int(update.message.text)
-        purchase = next((p for p in data["purchases"] if p["id"] == purchase_id), None)
+        purchase_id = int(update.message.text)  # شناسه خرید وارد شده توسط کاربر
+        purchase = next((p for p in data["purchases"] if p["id"] == purchase_id), None)  # جستجو برای خرید با شناسه وارد شده
+        
         if not purchase:
-            await update.message.reply_text("شناسه نامعتبر است. لطفاً دوباره تلاش کنید.")
+            await update.message.reply_text("شناسه خرید نامعتبر است. لطفاً دوباره تلاش کنید.")
             return EDIT_OR_DELETE
 
         actions = [["ویرایش", "حذف"]]
@@ -171,6 +172,7 @@ async def edit_or_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         await update.message.reply_text("شناسه باید عدد باشد. لطفاً دوباره تلاش کنید.")
         return EDIT_OR_DELETE
+
 
 # ویرایش خرید
 async def edit_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE):
